@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>문장별 TTS 플레이어</title>
+</head>
+<body>
+    <h1>📖 문장 단위 오디오 재생</h1>
+    <p id="status">준비 중...</p>
+    <audio id="player" controls autoplay></audio>
+
+    <script>
+        let currentIndex = 0;
+        let totalSentences = 0;
+        const player = document.getElementById("player");
+        const status = document.getElementById("status");
+
+        async function getSentenceCount() {
+            const res = await fetch("/api/get-sentence-count");
+            const data = await res.json();
+            return data.count;
+        }
+
+        async function playSentence(index) {
+            status.innerText = `재생 중: 문장 ${index + 1}번`;
+            player.src = `/api/get-audio/${index}`;
+            player.play();
+        }
+
+        player.addEventListener("ended", () => {
+            currentIndex++;
+            if (currentIndex < totalSentences) {
+                playSentence(currentIndex);
+            } else {
+                status.innerText = "✅ 모든 문장 재생 완료!";
+            }
+        });
+
+        // 초기 실행
+        window.onload = async () => {
+            totalSentences = await getSentenceCount();
+            if (totalSentences > 0) {
+                playSentence(currentIndex);
+            } else {
+                status.innerText = "❌ 재생할 문장이 없습니다.";
+            }
+        };
+    </script>
+</body>
+</html>
