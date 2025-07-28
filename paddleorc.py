@@ -30,6 +30,6 @@ print("📄 [텍스트 인식 결과]")
 print('\n'.join(texts))
 
 # 결과 저장
-with open('ocr_result.txt', 'w', encoding='utf-8') as f:
+with open('result/paddle_ocr_result.txt', 'w', encoding='utf-8') as f:
     f.write('\n'.join(texts))
 print("✅ 텍스트가 ocr_result.txt에 저장되었습니다.")

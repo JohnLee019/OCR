@@ -28,6 +28,6 @@ print("📄 [텍스트 인식 결과]")
 print(text)
 
 # 결과 저장 옵션
-with open('ocr_result.txt', 'w', encoding='utf-8') as f:
+with open('result/tesseract_ocr_result.txt', 'w', encoding='utf-8') as f:
     f.write(text)
 print("✅ 텍스트가 ocr_result.txt에 저장되었습니다.")
