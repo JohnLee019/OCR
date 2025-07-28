@@ -4,9 +4,9 @@ import asyncio
 import os
 import tempfile
 
-app1 = Flask(__name__, template_folder='templates')
+app = Flask(__name__, template_folder='templates')
 
-TEXT_FILE_PATH = 'book_page.txt'
+TEXT_FILE_PATH = 'result/book_page.txt'
 TEXT_STORAGE = {
     "sentences": []
 }
@@ -26,15 +26,15 @@ def load_text_file():
         TEXT_STORAGE["sentences"] = sentences
         print(f"[INFO] 텍스트 파일 로드 완료 - 문장 {len(sentences)}개")
 
-@app1.route('/')
+@app.route('/')
 def index():
-    return render_template("index1.html")
+    return render_template("index.html")
 
-@app1.route('/api/get-sentence-count', methods=['GET'])
+@app.route('/api/get-sentence-count', methods=['GET'])
 def get_sentence_count():
     return jsonify({"count": len(TEXT_STORAGE["sentences"])})
 
-@app1.route('/api/get-audio/<int:sentence_id>', methods=['GET'])
+@app.route('/api/get-audio/<int:sentence_id>', methods=['GET'])
 def get_audio(sentence_id):
     sentences = TEXT_STORAGE["sentences"]
     if sentence_id < 0 or sentence_id >= len(sentences):
@@ -53,4 +53,4 @@ def get_audio(sentence_id):
 
 if __name__ == '__main__':
     load_text_file()
-    app1.run(debug=True)
+    app.run(debug=True)
