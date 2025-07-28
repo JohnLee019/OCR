@@ -6,7 +6,7 @@ import tempfile
 
 app = Flask(__name__, template_folder='templates')
 
-TEXT_FILE_PATH = 'book_page.txt'
+TEXT_FILE_PATH = 'result/book_page.txt'
 TEXT_STORAGE = {
     "sentences": []
 }
