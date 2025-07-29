@@ -98,7 +98,7 @@ class ToolBar(QWidget):
             c.setVisible(self.is_expanded)
         # 크기 조정
         if self.is_expanded:
-            self.resize(160, 200)
+            self.resize(160, 230)
             self.apply_expanded_style()
         else:
             self.resize(100, 50)
