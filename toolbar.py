@@ -21,7 +21,7 @@ class ToolBar(QWidget):
         # 기본 창 설정: 축소 상태
         self.setWindowTitle("국립중앙도서관 툴바")
         self.setGeometry(200, 200, 100, 50)
-        self.setFixedSize(100, 50)
+        self.setFixedSize(117, 50)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
 
         # 상태 관리
@@ -109,7 +109,7 @@ class ToolBar(QWidget):
             self.resize(w, h)
         else:
             # 축소 시: 고정 크기
-            self.setFixedSize(100, 50)
+            self.setFixedSize(117, 50)
         # 스타일 업데이트
         if self.is_expanded:
             self.apply_expanded_style()
