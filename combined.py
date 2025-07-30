@@ -1,29 +1,46 @@
 import sys
 import os
+import asyncio
+import tempfile
 from PyQt5.QtWidgets import QApplication, QWidget
-from PyQt5.QtGui import QPainter, QPen
+from PyQt5.QtGui import QPainter, QPen, QGuiApplication
 from PyQt5.QtCore import Qt, QRect
-from PyQt5.QtGui import QGuiApplication
 from PIL import ImageGrab
-import cv2
-import pytesseract
+from paddleocr import PaddleOCR
+import edge_tts
 
-# (Windows 전용) Tesseract 설치 경로 설정
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# -----------------------------------------
+# 설정
+# -----------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SNIP_PATH = os.path.join(BASE_DIR, 'snip.png')
+OUTPUT_DIR = os.path.join(BASE_DIR, 'result')
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, 'snip_ocr.txt')
 
+# TTS 설정
+VOICE_NAME = "ko-KR-SunHiNeural"  # 필요 시 변경 가능
+
+# PaddleOCR 초기화 (한국어)
+ocr = PaddleOCR(
+    use_textline_orientation=False,
+    use_doc_orientation_classify=False,
+    use_doc_unwarping=False,
+    lang='korean'
+)
+
+# -----------------------------------------
+# 스니핑 툴
+# -----------------------------------------
 class SnippingTool(QWidget):
     def __init__(self):
         super().__init__()
-        # 창 세팅: 가장 위, 테두리 없음, 반투명
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setWindowOpacity(0.5)
         self.setCursor(Qt.CrossCursor)
-
-        # 화면 전체 크기로 창 띄우기
-        screen_rect = QGuiApplication.primaryScreen().geometry()
-        self.setGeometry(screen_rect)
+        screen = QGuiApplication.primaryScreen().geometry()
+        self.setGeometry(screen)
         self.begin = self.end = None
-        self.save_path = "snip.png"
+        self.save_path = SNIP_PATH
         self.showFullScreen()
         print("🖼️ Snipping tool started. Drag to select area.")
 
@@ -43,56 +60,61 @@ class SnippingTool(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, event):
-        # 선택 영역 좌표 계산
         x1, y1 = min(self.begin.x(), self.end.x()), min(self.begin.y(), self.end.y())
         x2, y2 = max(self.begin.x(), self.end.x()), max(self.begin.y(), self.end.y())
         self.close()
-
-        # 화면 캡처 및 파일 저장
         img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
         img.save(self.save_path)
         print(f"📸 Screenshot saved to {self.save_path}")
+        run_pipeline(self.save_path)
 
-        # OCR 처리
-        run_ocr(self.save_path)
+# -----------------------------------------
+# OCR + TTS 파이프라인
+# -----------------------------------------
 
-def run_ocr(image_path):
-    print("🧠 Running OCR (영어+한국어)...")
-    if not os.path.exists(image_path):
-        print(f"[❌ Error] File not found: {image_path}")
-        return
+def run_pipeline(image_path):
+    # OCR
+    print("🧠 Running PaddleOCR...")
+    raw = ocr.predict(image_path)
+    texts = []
+    if isinstance(raw, list) and raw:
+        if isinstance(raw[0], dict):
+            for page in raw:
+                texts.extend(page.get('rec_texts', []))
+        else:
+            for line in raw:
+                for item in line:
+                    if isinstance(item, list) and len(item) == 2:
+                        t = item[1]
+                        if isinstance(t, tuple):
+                            texts.append(t[0])
+                        else:
+                            texts.append(t)
+                    elif isinstance(item, list) and len(item) >= 3:
+                        texts.append(item[1])
+    else:
+        print("⚠️ Unexpected OCR format.")
+    full_text = "\n".join(texts)
+    # 파일로 저장
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+        f.write(full_text)
+    print(f"✅ OCR text saved to {OUTPUT_FILE}")
 
-    # OpenCV로 이미지 읽기
-    image = cv2.imread(image_path)
-    if image is None:
-        print(f"[❌ Error] Failed to load image: {image_path}")
-        return
+    # TTS 생성 및 재생
+    temp_audio = os.path.join(tempfile.gettempdir(), 'snip_tts.mp3')
+    async def gen_tts():
+        tts = edge_tts.Communicate(text=full_text, voice=VOICE_NAME)
+        await tts.save(temp_audio)
+    print("🔉 Generating TTS audio...")
+    asyncio.run(gen_tts())
+    print("▶️ Playing audio...")
+    os.startfile(temp_audio)
 
-    # 그레이스케일 + 이진화 처리 (OCR 정확도 향상)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 0, 255,
-                              cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # Tesseract OCR (영어+한국어)
-    # kor.traineddata가 tessdata 폴더에 있어야 합니다.
-    text = pytesseract.image_to_string(binary, lang='eng+kor')
-    if not text.strip():
-        print("[⚠️ Warning] OCR returned empty text. Saving anyway.")
-
-    # 결과 디렉토리 확보
-    output_dir = "result"
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "snipping_ocr_result.txt")
-
-    # 텍스트 파일로 저장
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(text)
-
-    print(f"✅ OCR complete. Text saved to {output_path}")
-    print("📄 Recognized text:")
-    print(text)
-
-if __name__ == "__main__":
+# -----------------------------------------
+# 진입점
+# -----------------------------------------
+if __name__ == '__main__':
     app = QApplication(sys.argv)
     tool = SnippingTool()
     sys.exit(app.exec_())
