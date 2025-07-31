@@ -1,5 +1,0 @@
-# 한글/영문
-구간별
-분할
-segments =
-SEGMENT_RE.findall(full_text)
