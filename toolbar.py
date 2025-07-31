@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QSize, QPoint
 from PyQt5.QtGui import QIcon
+from combined import SnippingTool  # Combined 모듈의 스니핑 기능 import
 
 IMAGE_DIR = "image"
 FALLBACK = {
@@ -25,7 +26,7 @@ class ToolBar(QWidget):
         self.dragging = False
         self.drag_start_position = QPoint()
 
-        # ✅ 리사이즈 관련 상태
+        # 리사이즈 관련 상태
         self.resize_margin = 8
         self.resizing = False
         self.resize_direction = {}
@@ -62,6 +63,9 @@ class ToolBar(QWidget):
             row = QHBoxLayout(row_widget)
             row.setContentsMargins(10, 2, 10, 2)
             btn = self._create_icon(name, 48)
+            # 스니핑 기능 연동
+            if name == "snip":
+                btn.clicked.connect(self.start_snipping)
             lbl = QLabel(label_text, self)
             lbl.setStyleSheet("font-size:14px; font-weight:bold;")
             row.addWidget(btn)
@@ -72,6 +76,11 @@ class ToolBar(QWidget):
             self.tool_containers.append(row_widget)
 
         self.setStyleSheet("QWidget{background:#f9f9f9;}")
+
+    def start_snipping(self):
+        # Combined 모듈의 SnippingTool 실행
+        self.snipper = SnippingTool()
+        self.snipper.show()
 
     def _create_icon(self, name, size):
         path = os.path.join(IMAGE_DIR, f"{name}.png")
@@ -124,7 +133,6 @@ class ToolBar(QWidget):
             btn = c.layout().itemAt(0).widget()
             btn.setStyleSheet("border:none; background:transparent;")
 
-    # ── 마우스 이동 & 리사이즈 ──
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.drag_start_position = event.globalPos()
