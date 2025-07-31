@@ -2,6 +2,8 @@ import sys
 import os
 import asyncio
 import tempfile
+import threading
+import re
 from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtGui import QPainter, QPen, QGuiApplication
 from PyQt5.QtCore import Qt, QRect
@@ -16,9 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SNIP_PATH = os.path.join(BASE_DIR, 'snip.png')
 OUTPUT_DIR = os.path.join(BASE_DIR, 'result')
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, 'snip_ocr.txt')
-
-# TTS 설정
-VOICE_NAME = "ko-KR-SunHiNeural"  # 필요 시 변경 가능
+VOICE_NAME = "ko-KR-SunHiNeural"
 
 # PaddleOCR 초기화 (한국어)
 ocr = PaddleOCR(
@@ -28,9 +28,6 @@ ocr = PaddleOCR(
     lang='korean'
 )
 
-# -----------------------------------------
-# 스니핑 툴
-# -----------------------------------------
 class SnippingTool(QWidget):
     def __init__(self):
         super().__init__()
@@ -64,56 +61,53 @@ class SnippingTool(QWidget):
         x2, y2 = max(self.begin.x(), self.end.x()), max(self.begin.y(), self.end.y())
         self.close()
         img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
         img.save(self.save_path)
         print(f"📸 Screenshot saved to {self.save_path}")
-        run_pipeline(self.save_path)
+        # 백그라운드에서 OCR + TTS 스트리밍 실행
+        threading.Thread(target=stream_pipeline, args=(self.save_path,), daemon=True).start()
 
 # -----------------------------------------
-# OCR + TTS 파이프라인
+# OCR + 스트리밍 TTS 파이프라인
 # -----------------------------------------
-
-def run_pipeline(image_path):
-    # OCR
+def stream_pipeline(image_path):
     print("🧠 Running PaddleOCR...")
     raw = ocr.predict(image_path)
-    texts = []
+    lines = []
     if isinstance(raw, list) and raw:
         if isinstance(raw[0], dict):
             for page in raw:
-                texts.extend(page.get('rec_texts', []))
+                lines.extend(page.get('rec_texts', []))
         else:
             for line in raw:
                 for item in line:
-                    if isinstance(item, list) and len(item) == 2:
-                        t = item[1]
-                        if isinstance(t, tuple):
-                            texts.append(t[0])
-                        else:
-                            texts.append(t)
-                    elif isinstance(item, list) and len(item) >= 3:
-                        texts.append(item[1])
-    else:
-        print("⚠️ Unexpected OCR format.")
-    full_text = "\n".join(texts)
-    # 파일로 저장
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+                    if isinstance(item, list):
+                        if len(item) >= 2:
+                            t = item[1]
+                            lines.append(t[0] if isinstance(t, tuple) else t)
+    full_text = "\n".join(lines)
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         f.write(full_text)
     print(f"✅ OCR text saved to {OUTPUT_FILE}")
 
-    # TTS 생성 및 재생
-    temp_audio = os.path.join(tempfile.gettempdir(), 'snip_tts.mp3')
-    async def gen_tts():
-        tts = edge_tts.Communicate(text=full_text, voice=VOICE_NAME)
-        await tts.save(temp_audio)
-    print("🔉 Generating TTS audio...")
-    asyncio.run(gen_tts())
-    print("▶️ Playing audio...")
-    os.startfile(temp_audio)
+    # 문장 단위로 분할
+    sentences = []
+    for line in lines:
+        # 마침표, 물음표, 느낌표 기준
+        parts = re.split(r'(?<=[\.\?!])\s*', line)
+        sentences.extend([s.strip() for s in parts if s.strip()])
 
-# -----------------------------------------
-# 진입점
-# -----------------------------------------
+    # TTS 스트리밍: 문장별로 생성·재생
+    for idx, sentence in enumerate(sentences):
+        temp_audio = os.path.join(tempfile.gettempdir(), f'snip_tts_{idx}.mp3')
+        async def gen_tts(text, path):
+            tts = edge_tts.Communicate(text=text, voice=VOICE_NAME)
+            await tts.save(path)
+        print(f"🔉 Generating TTS for sentence {idx+1}/{len(sentences)}...")
+        asyncio.run(gen_tts(sentence, temp_audio))
+        print(f"▶️ Playing sentence {idx+1}")
+        os.startfile(temp_audio)
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     tool = SnippingTool()
