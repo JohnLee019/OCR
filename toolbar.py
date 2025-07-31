@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFrame, QLabel
 )
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QSize, QPoint
 from PyQt5.QtGui import QIcon
 
 IMAGE_DIR = "image"
@@ -15,35 +15,29 @@ FALLBACK = {
 class ToolBar(QWidget):
     def __init__(self):
         super().__init__()
-        # 마지막 확대 크기 저장 (기본 확대 사이즈)
         self.last_expanded_size = (160, 230)
 
-        # 기본 창 설정: 축소 상태
         self.setWindowTitle("국립중앙도서관 툴바")
         self.setGeometry(200, 200, 100, 50)
         self.setFixedSize(117, 50)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
 
-        # 상태 관리
-        self.resize_margin = 8
-        self.resizing = False
-        self.moving = False
-        self.drag_position = None
-        self.resize_direction = None
+        # 상태
         self.is_expanded = False
+        self.dragging = False
+        self.drag_start_position = QPoint()
 
-        # UI 초기화
         self.init_ui()
 
     def init_ui(self):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-        # 상단바: 토글, 제목, 닫기
-        top = QFrame(self)
-        top.setFixedHeight(40)
-        top.setStyleSheet("background-color:#004ea2;")
-        h = QHBoxLayout(top)
+        # 상단바
+        self.top_bar = QFrame(self)
+        self.top_bar.setFixedHeight(40)
+        self.top_bar.setStyleSheet("background-color:#004ea2;")
+        h = QHBoxLayout(self.top_bar)
         h.setContentsMargins(8, 5, 8, 5)
 
         self.toggle_btn = self._create_icon("toggle", 28)
@@ -57,9 +51,8 @@ class ToolBar(QWidget):
         h.addWidget(self.title_lbl)
         h.addStretch()
         h.addWidget(self.close_btn)
-        self.layout.addWidget(top)
+        self.layout.addWidget(self.top_bar)
 
-        # 확장 시 보이는 도구 컨테이너
         self.tool_containers = []
         tools = [("캡처", "snip"), ("일시정지", "pause"), ("재시작", "play")]
         for label_text, name in tools:
@@ -93,24 +86,19 @@ class ToolBar(QWidget):
         return btn
 
     def toggle_toolbar(self):
-        # 토글 상태 변경
         self.is_expanded = not self.is_expanded
-        # 제목 변경
         self.title_lbl.setText("국립중앙도서관 툴바" if self.is_expanded else "툴바")
-        # 도구 컨테이너 표시/숨김
         for c in self.tool_containers:
             c.setVisible(self.is_expanded)
+
         if self.is_expanded:
-            # 확장 시: 크기 제한 해제, 최소/최대 크기 설정
             self.setMinimumSize(160, 230)
             self.setMaximumSize(300, 400)
-            # 마지막 저장된 크기로 복원
             w, h = self.last_expanded_size
             self.resize(w, h)
         else:
-            # 축소 시: 고정 크기
             self.setFixedSize(117, 50)
-        # 스타일 업데이트
+
         if self.is_expanded:
             self.apply_expanded_style()
         else:
@@ -120,8 +108,14 @@ class ToolBar(QWidget):
         for c in self.tool_containers:
             btn = c.layout().itemAt(0).widget()
             btn.setStyleSheet("""
-                QPushButton { background-color:#ffffff; border:1px solid #004ea2; border-radius:4px; }
-                QPushButton:hover { background-color:#e6f0fa; }
+                QPushButton {
+                    background-color:#ffffff;
+                    border:1px solid #004ea2;
+                    border-radius:4px;
+                }
+                QPushButton:hover {
+                    background-color:#e6f0fa;
+                }
             """)
 
     def apply_collapsed_style(self):
@@ -132,10 +126,21 @@ class ToolBar(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.is_expanded:
-            # 사용자가 직접 리사이즈하면 크기 저장
             self.last_expanded_size = (self.width(), self.height())
 
-    # 마우스 이동/리사이즈 핸들링은 생략 (기존 로직 그대로)
+    # ✅ 툴바 창을 마우스로 이동 가능하도록 만드는 부분
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.top_bar.geometry().contains(event.pos()):
+            self.dragging = True
+            self.drag_start_position = event.globalPos() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if self.dragging:
+            self.move(event.globalPos() - self.drag_start_position)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.dragging = False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
