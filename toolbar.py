@@ -5,17 +5,18 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QSize, QPoint
 from PyQt5.QtGui import QIcon
-from combined import SnippingTool  # Combined 모듈의 스니핑 기능 import
+from combined import SnippingTool, run_pipeline
 
 IMAGE_DIR = "image"
 FALLBACK = {
     "toggle": "≡", "close": "✕",
-    "snip": "📷", "pause": "⏸", "play": "▶"
+    "snip": "📷", "pause": "⏸", "play": "▶", "cancel": "✖"
 }
 
 class ToolBar(QWidget):
     def __init__(self):
         super().__init__()
+        print("[ToolBar] ToolBar __init__ 호출됨")
 
         self.setWindowTitle("국립중앙도서관 오디오")
         self.setGeometry(200, 200, 100, 50)
@@ -25,8 +26,9 @@ class ToolBar(QWidget):
         self.is_expanded = False
         self.dragging = False
         self.drag_start_position = QPoint()
+        self.snipping_active = False
+        self.snipper = None
 
-        # 리사이즈 관련 상태
         self.resize_margin = 8
         self.resizing = False
         self.resize_direction = {}
@@ -48,7 +50,7 @@ class ToolBar(QWidget):
         self.title_lbl = QLabel("툴바", self)
         self.title_lbl.setStyleSheet("color:#ffffff; font-size:14px; font-weight:bold;")
         self.close_btn = self._create_icon("close", 28)
-        self.close_btn.clicked.connect(self.close)
+        self.close_btn.clicked.connect(self.close_application)
 
         h.addWidget(self.toggle_btn)
         h.addWidget(self.title_lbl)
@@ -63,7 +65,6 @@ class ToolBar(QWidget):
             row = QHBoxLayout(row_widget)
             row.setContentsMargins(10, 2, 10, 2)
             btn = self._create_icon(name, 48)
-            # 스니핑 기능 연동
             if name == "snip":
                 btn.clicked.connect(self.start_snipping)
             lbl = QLabel(label_text, self)
@@ -75,12 +76,92 @@ class ToolBar(QWidget):
             self.layout.addWidget(row_widget)
             self.tool_containers.append(row_widget)
 
+        self.cancel_button_widget = QWidget(self)
+        cancel_row = QHBoxLayout(self.cancel_button_widget)
+        cancel_row.setContentsMargins(10, 2, 10, 2)
+        self.cancel_btn = self._create_icon("cancel", 48)
+        self.cancel_btn.clicked.connect(self.cancel_snipping)
+        cancel_lbl = QLabel("취소", self)
+        cancel_lbl.setStyleSheet("font-size:14px; font-weight:bold;")
+        cancel_row.addWidget(self.cancel_btn)
+        cancel_row.addWidget(cancel_lbl)
+        cancel_row.addStretch()
+        self.cancel_button_widget.setVisible(False)
+        self.layout.addWidget(self.cancel_button_widget)
+        
         self.setStyleSheet("QWidget{background:#f9f9f9;}")
 
+    def close_application(self):
+        print("[ToolBar] close_application 호출됨. 애플리케이션 종료 시작.")
+        if hasattr(self, 'snipper') and self.snipper and self.snipper.isVisible():
+            print("[ToolBar] 활성 스니퍼가 감지되어 먼저 취소합니다.")
+            self.snipper.canceled = True
+            self.snipper.close()
+        self.close()
+        QApplication.instance().quit()
+        print("[ToolBar] QApplication.quit() 호출됨. (이 메시지 이후 프로세스 종료 예상)")
+
+
     def start_snipping(self):
-        # Combined 모듈의 SnippingTool 실행
-        self.snipper = SnippingTool()
+        print("[ToolBar] start_snipping 호출됨. 툴바 숨김.")
+        self.snipping_active = True
+        self.hide()
+        self.snipper = SnippingTool(
+            callback_on_cancel=self.on_snipping_cancelled,
+            callback_on_snip_done=self.handle_snipped_image
+        )
         self.snipper.show()
+        self.show_cancel_button()
+
+    def handle_snipped_image(self, image_path):
+        print(f"[ToolBar] handle_snipped_image 콜백 호출됨: {image_path}")
+        run_pipeline(image_path)
+        self.on_snipping_cancelled()
+        print("[ToolBar] handle_snipped_image 처리 완료.")
+
+
+    def cancel_snipping(self):
+        print("[ToolBar] cancel_snipping 호출됨 (취소 버튼 클릭).")
+        if hasattr(self, 'snipper') and self.snipper and self.snipper.isVisible():
+            print("[ToolBar] 활성 스니퍼를 취소합니다.")
+            self.snipper.canceled = True
+            self.snipper.close()
+        self.on_snipping_cancelled()
+        print("[ToolBar] cancel_snipping 처리 완료.")
+
+
+    def on_snipping_cancelled(self):
+        print("[ToolBar] on_snipping_cancelled 호출됨. 툴바 상태 복원 시작.")
+        self.snipping_active = False
+        self.hide_cancel_button()
+        self.show() # 툴바 창 다시 표시
+        print("[ToolBar] 툴바 창 다시 표시 요청됨 (self.show()).") # --- print 추가 ---
+        self.is_expanded = False
+        self.toggle_toolbar()
+        if self.snipper:
+            print("[ToolBar] 스니퍼 인스턴스 정리.")
+            self.snipper = None
+        print("[ToolBar] on_snipping_cancelled 처리 완료.")
+
+
+    def show_cancel_button(self):
+        print("[ToolBar] show_cancel_button 호출됨.")
+        self.setFixedSize(117, 90)
+        self.cancel_button_widget.setVisible(True)
+        self.top_bar.setVisible(False)
+        for c in self.tool_containers:
+            c.setVisible(False)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        print("[ToolBar] 취소 버튼 표시 완료.")
+
+
+    def hide_cancel_button(self):
+        print("[ToolBar] hide_cancel_button 호출됨.")
+        self.cancel_button_widget.setVisible(False)
+        self.top_bar.setVisible(True)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        print("[ToolBar] 취소 버튼 숨김 완료.")
+
 
     def _create_icon(self, name, size):
         path = os.path.join(IMAGE_DIR, f"{name}.png")
@@ -91,12 +172,33 @@ class ToolBar(QWidget):
         else:
             btn.setText(FALLBACK.get(name, "?"))
             color = "#ffffff" if name in ("toggle", "close") else "#004ea2"
+            if name == "cancel":
+                color = "#dc3545"
             btn.setStyleSheet(f"font-size:20px; color:{color};")
         btn.setFixedSize(size, size)
         btn.setStyleSheet(btn.styleSheet() + "border:none; background:transparent;")
+        
+        if name == "cancel":
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color:#ffffff;
+                    border:1px solid #dc3545;
+                    border-radius:4px;
+                    color: #dc3545;
+                    font-size:20px;
+                }
+                QPushButton:hover {
+                    background-color:#f8d7da;
+                }
+            """)
         return btn
 
     def toggle_toolbar(self):
+        print(f"[ToolBar] toggle_toolbar 호출됨. is_expanded: {self.is_expanded}, snipping_active: {self.snipping_active}")
+        if self.snipping_active:
+            print("[ToolBar] 스니핑 중이므로 툴바 토글 건너뜀.")
+            return
+
         self.is_expanded = not self.is_expanded
         self.title_lbl.setText("국립중앙도서관 툴바" if self.is_expanded else "툴바")
         for c in self.tool_containers:
@@ -106,8 +208,10 @@ class ToolBar(QWidget):
             self.setMinimumSize(160, 230)
             self.setMaximumSize(300, 360)
             self.resize(235, 280)
+            print("[ToolBar] 툴바 확장됨.")
         else:
             self.setFixedSize(117, 50)
+            print("[ToolBar] 툴바 축소됨.")
 
         if self.is_expanded:
             self.apply_expanded_style()
@@ -134,6 +238,9 @@ class ToolBar(QWidget):
             btn.setStyleSheet("border:none; background:transparent;")
 
     def mousePressEvent(self, event):
+        if self.snipping_active:
+            return
+
         if event.button() == Qt.LeftButton:
             self.drag_start_position = event.globalPos()
             self.resize_direction = self._get_resize_direction(event.pos())
@@ -145,6 +252,9 @@ class ToolBar(QWidget):
                 self.drag_offset = event.globalPos() - self.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, event):
+        if self.snipping_active:
+            return
+
         if self.resizing:
             self._perform_resize(event.globalPos())
         elif self.dragging:
@@ -153,6 +263,9 @@ class ToolBar(QWidget):
             self._update_cursor(event.pos())
 
     def mouseReleaseEvent(self, event):
+        if self.snipping_active:
+            return
+            
         self.resizing = False
         self.dragging = False
         self.setCursor(Qt.ArrowCursor)
@@ -211,7 +324,10 @@ class ToolBar(QWidget):
         self.drag_start_position = global_pos
 
 if __name__ == "__main__":
+    print("[toolbar.py] toolbar.py 직접 실행됨. QApplication 시작.")
     app = QApplication(sys.argv)
     tb = ToolBar()
     tb.show()
+    print("[toolbar.py] ToolBar.show() 호출 완료. 이벤트 루프 진입 전.") # --- print 추가 ---
     sys.exit(app.exec_())
+    print("[toolbar.py] QApplication.exec_() 종료됨. (이 메시지는 도달하기 어려울 수 있음)") # --- print 추가 ---
