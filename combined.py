@@ -8,7 +8,6 @@ from PyQt5.QtGui import QPainter, QPen, QGuiApplication
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, QObject
 import time
 from PIL import ImageGrab
-from langdetect import detect, LangDetectException
 
 #-----------------------------------------
 # 설정
@@ -19,10 +18,10 @@ OUTPUT_DIR = os.path.join(BASE_DIR, 'result')
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, 'snip_ocr.txt')
 
 # TTS 설정
-# 기본값은 한국어 TTS로 설정
-VOICE_NAME = "ko-KR-SunHiNeural"
+# 한국어 TTS 음성 이름
+KO_VOICE_NAME = "ko-KR-SunHiNeural"
 # 영어 TTS 음성 이름 (원하는 다른 음성으로 변경 가능)
-ENGLISH_VOICE_NAME = "en-US-JennyNeural"
+EN_VOICE_NAME = "en-US-JennyNeural"
 
 # 글로벌 변수 선언 (초기화는 initialize_components 함수에서 진행)
 ocr = None
@@ -97,29 +96,6 @@ def initialize_components(progress_callback):
     progress_callback.emit(100, "모든 초기화 작업 완료.") # 마지막은 항상 100%로
 
     print("[INIT] 모든 초기화 작업 완료.")
-
-#-----------------------------------------
-# 언어 감지 및 TTS 음성 선택
-#-----------------------------------------
-def get_tts_voice_by_lang(text):
-    """
-    텍스트의 언어를 감지하여 적절한 TTS 음성 이름을 반환합니다.
-    """
-    global VOICE_NAME, ENGLISH_VOICE_NAME
-    
-    try:
-        lang = detect(text)
-        print(f"🌍 감지된 언어: {lang}")
-        if lang == 'ko':
-            return VOICE_NAME
-        elif lang == 'en':
-            return ENGLISH_VOICE_NAME
-        else:
-            print(f"⚠️ 지원되지 않는 언어({lang})입니다. 기본 TTS 음성으로 재생합니다.")
-            return VOICE_NAME
-    except LangDetectException:
-        print("⚠️ 언어 감지 실패. 기본 TTS 음성으로 재생합니다.")
-        return VOICE_NAME
 
 #-----------------------------------------
 # 오디오 제어 함수
@@ -221,7 +197,7 @@ class SnippingTool(QWidget):
 # OCR + TTS 실행
 #-----------------------------------------
 def run_pipeline(image_path):
-    global _last_ocr_text, ocr, _edge_tts, _asyncio
+    global _last_ocr_text, ocr, _edge_tts, _asyncio, KO_VOICE_NAME, EN_VOICE_NAME
     if ocr is None or _edge_tts is None or _asyncio is None:
         print("[ERROR] 필수 컴포넌트(OCR, TTS)가 초기화되지 않았습니다.")
         return
@@ -260,8 +236,11 @@ def run_pipeline(image_path):
         print(f"✅ OCR text saved to {OUTPUT_FILE}")
         _last_ocr_text = full_text
 
-        # 텍스트 언어 감지 및 TTS 음성 선택
-        voice_name = get_tts_voice_by_lang(full_text)
+        # 텍스트에 한국어 문자가 포함되어 있는지 확인
+        has_korean = any('\uac00' <= char <= '\ud7a3' for char in full_text)
+
+        # 한국어 문자가 있으면 한국어 TTS, 없으면 영어 TTS 선택
+        voice_name = KO_VOICE_NAME if has_korean else EN_VOICE_NAME
         print(f"🎤 선택된 TTS 음성: {voice_name}")
 
         if _pygame is not None and _pygame.mixer.music.get_busy():
