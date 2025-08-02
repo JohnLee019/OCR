@@ -14,7 +14,7 @@ import pygame
 # 설정
 # -----------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SNIP_PATH = os.path.join(BASE_DIR, 'snip.png')
+SNIP_PATH = os.path.join(BASE_DIR, 'result/snip.png')
 OUTPUT_DIR = os.path.join(BASE_DIR, 'result')
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, 'snip_ocr.txt')
 
