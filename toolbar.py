@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QSize, QPoint
 from PyQt5.QtGui import QIcon
-from combined import SnippingTool, run_pipeline, pause_audio, resume_audio, stop_audio
+from combined import SnippingTool, run_pipeline, pause_audio, resume_audio, stop_audio, get_last_ocr_text
 
 # 이미지 및 대체 텍스트 설정
 IMAGE_DIR = "image"
@@ -53,6 +53,7 @@ class ToolBar(QWidget):
         # 상단 바 (토글, 제목, 닫기 버튼 포함)
         self.top_bar = QFrame(self)
         self.top_bar.setFixedHeight(40)
+        # 상단 바의 스타일에서 하단 테두리를 제거합니다.
         self.top_bar.setStyleSheet("background-color:#004ea2;")
         h = QHBoxLayout(self.top_bar)
         h.setContentsMargins(8, 5, 8, 5)
@@ -60,7 +61,6 @@ class ToolBar(QWidget):
         self.toggle_btn = self._create_icon("toggle", 28, 20)
         self.toggle_btn.clicked.connect(self.toggle_toolbar)
         self.title_lbl = QLabel("툴바", self)
-        # 툴바 제목의 글자 크기를 18px로 변경
         self.title_lbl.setStyleSheet("color:#ffffff; font-size:15px; font-weight:900;")
         self.close_btn = self._create_icon("close", 28, 20)
         self.close_btn.clicked.connect(self.close_application)
@@ -99,7 +99,7 @@ class ToolBar(QWidget):
                 self.stop_btn.clicked.connect(self._on_stop_clicked)
 
             lbl = QLabel(label_text, self)
-            lbl.setStyleSheet("font-size:14px; font-weight:900;")
+            lbl.setStyleSheet("font-size:16px; font-weight:900;")
             row.addWidget(btn)
             row.addWidget(lbl)
             row.addStretch()
@@ -116,13 +116,14 @@ class ToolBar(QWidget):
         self.cancel_btn = self._create_icon("cancel", 48, 36)
         self.cancel_btn.clicked.connect(self.cancel_snipping)
         cancel_lbl = QLabel("취소", self)
-        cancel_lbl.setStyleSheet("font-size:14px; font-weight:900;")
+        cancel_lbl.setStyleSheet("font-size:16px; font-weight:900;")
         cancel_row.addWidget(self.cancel_btn)
         cancel_row.addWidget(cancel_lbl)
         cancel_row.addStretch()
         self.cancel_button_widget.setVisible(False)
         self.layout.addWidget(self.cancel_button_widget)
 
+        # 툴바 전체 위젯에 테두리 스타일을 적용합니다.
         self.setStyleSheet("QWidget{background:#f9f9f9;}")
 
     def _update_audio_button_colors(self, status):
@@ -135,8 +136,6 @@ class ToolBar(QWidget):
             base_style = """
                 QPushButton {
                     background-color:#ffffff;
-                    border:1px solid #004ea2;
-                    border-radius:4px;
                     font-size:20px;
                 }
                 QPushButton:disabled {
@@ -290,14 +289,11 @@ class ToolBar(QWidget):
                 color = "#dc3545"
             btn.setStyleSheet(f"font-size:{icon_size}px; color:{color};")
         btn.setFixedSize(size, size)
-        btn.setStyleSheet(btn.styleSheet() + "border:none; background:transparent;")
         
         if name == "cancel":
             btn.setStyleSheet("""
                 QPushButton {
                     background-color:#ffffff;
-                    border:1px solid #dc3545;
-                    border-radius:4px;
                     color: #dc3545;
                     font-size:20px;
                 }
@@ -305,6 +301,8 @@ class ToolBar(QWidget):
                     background-color:#f8d7da;
                 }
             """)
+        else:
+            btn.setStyleSheet(btn.styleSheet() + "background:transparent;")
         return btn
 
     def toggle_toolbar(self):
@@ -337,8 +335,6 @@ class ToolBar(QWidget):
         style = """
             QPushButton {
                 background-color:#ffffff;
-                border:1px solid #004ea2;
-                border-radius:4px;
             }
             QPushButton:hover {
                 background-color:#e6f0fa;
@@ -351,7 +347,7 @@ class ToolBar(QWidget):
             btn = c.layout().itemAt(0).widget()
             btn_name = btn.objectName()
             if btn_name in ("snip", "pause", "play", "stop"):
-                btn.setStyleSheet("border:none; background:transparent;")
+                btn.setStyleSheet("background:transparent;")
             
     def mousePressEvent(self, event):
         if self.snipping_active:
@@ -438,12 +434,3 @@ class ToolBar(QWidget):
 
         self.setGeometry(g)
         self.drag_start_position = global_pos
-
-if __name__ == "__main__":
-    print("[toolbar.py] toolbar.py 직접 실행됨. QApplication 시작.")
-    app = QApplication(sys.argv)
-    tb = ToolBar()
-    tb.show()
-    print("[toolbar.py] ToolBar.show() 호출 완료. 이벤트 루프 진입 전.")
-    sys.exit(app.exec_())
-    print("[toolbar.py] QApplication.exec_() 종료됨. (이 메시지는 도달하기 어려울 수 있음)")
