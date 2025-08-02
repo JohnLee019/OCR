@@ -1,3 +1,8 @@
-print("" TTs 오디오
+asyncio.run(gen_tts())
+print(" TTS
+오디오
 생성
-완료”)
+완료”
+play_audio(temp_audio)
+xcept Exception as e:
+print(f"[ERRoR] run_pipeline 오류: {e}")
