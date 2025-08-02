@@ -1,0 +1,20 @@
+if
+name
+−
+main
+print("
+'[toolbar.py]
+toolbar.py
+직접
+실행됨.QApplication 시작."
+app
+4
+QApplication(sys.argv)
+tb
+ToolBar
+tb.show()
+print("[toolbar.py]
+ToolBar.show() 호출 완료.이벤트 루프 진입 전.")
+sys.exit(app.exec_
+≥)
+print("[toolbar.py] QApplication.exec_()종료됨.(이 메시지는 도달하기 어려울 수 있음)")
