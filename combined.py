@@ -4,10 +4,11 @@ import asyncio
 import tempfile
 import uuid
 from PyQt5.QtWidgets import QWidget, QApplication
-from PyQt5.QtGui import QPainter, QPen, QGuiApplication
-from PyQt5.QtCore import Qt, QRect, pyqtSignal, QObject
+from PyQt5.QtGui import QPainter, QPen, QGuiApplication, QFont, QColor
+from PyQt5.QtCore import Qt, QRect, pyqtSignal, QObject, QPoint
 import time
 from PIL import ImageGrab
+import pyautogui
 
 #-----------------------------------------
 # 설정
@@ -165,11 +166,22 @@ def is_audio_finished():
 def get_current_audio_file():
     return _tts_file_path
 
+def perform_mouse_click(click_pos):
+    """
+    저장된 위치에 마우스 클릭을 수행합니다.
+    click_pos: QPoint 객체
+    """
+    if click_pos:
+        pyautogui.click(click_pos.x(), click_pos.y())
+        print(f"[Automation] 마우스 클릭: {click_pos.x()}, {click_pos.y()}")
+    else:
+        print("[Automation] 클릭 위치가 설정되지 않았습니다.")
+
 #-----------------------------------------
 # 스니핑 툴
 #-----------------------------------------
 class SnippingTool(QWidget):
-    def __init__(self, callback_on_cancel=None, callback_on_snip_done=None):
+    def __init__(self, mode='read_area', callback_on_cancel=None, callback_on_snip_done=None, instruction_text=""):
         super().__init__()
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setWindowOpacity(0.5)
@@ -182,12 +194,27 @@ class SnippingTool(QWidget):
         self.canceled = False
         self.callback_on_cancel = callback_on_cancel
         self.callback_on_snip_done = callback_on_snip_done
+        self.mode = mode
+        self.instruction_text = instruction_text
+        self.setMouseTracking(True)
 
     def paintEvent(self, event):
+        painter = QPainter(self)
+        
+        # 안내 텍스트 그리기
+        if self.instruction_text:
+            painter.setPen(QColor(255, 255, 255))
+            painter.setFont(QFont("나눔고딕", 20, QFont.Bold))
+            text_rect = QRect(0, 0, self.width(), self.height())
+            painter.drawText(text_rect, Qt.AlignCenter, self.instruction_text)
+
         if self.begin and self.end:
-            painter = QPainter(self)
-            painter.setPen(QPen(Qt.red, 2))
-            painter.drawRect(QRect(self.begin, self.end).normalized())
+            painter.setPen(QPen(Qt.red, 2, Qt.SolidLine))
+            if self.mode in ('read_area', 'normal'):
+                rect = QRect(self.begin, self.end).normalized()
+                painter.drawRect(rect)
+            elif self.mode == 'click_pos':
+                painter.drawEllipse(self.begin, 5, 5)
 
     def mousePressEvent(self, event):
         self.begin = event.pos()
@@ -201,17 +228,32 @@ class SnippingTool(QWidget):
     def mouseReleaseEvent(self, event):
         if self.canceled:
             return
-        x1, y1 = min(self.begin.x(), self.end.x()), min(self.begin.y(), self.end.y())
-        x2, y2 = max(self.begin.x(), self.end.x()), max(self.begin.y(), self.end.y())
+        
         self.close()
-        if abs(x2 - x1) > 5 and abs(y2 - y1) > 5:
-            img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
-            img.save(self.save_path)
+
+        if self.mode == 'read_area':
+            x1, y1 = min(self.begin.x(), self.end.x()), min(self.begin.y(), self.end.y())
+            x2, y2 = max(self.begin.x(), self.end.x()), max(self.begin.y(), self.end.y())
+            if abs(x2 - x1) > 5 and abs(y2 - y1) > 5:
+                if self.callback_on_snip_done:
+                    self.callback_on_snip_done((x1, y1, x2, y2))
+            else:
+                if self.callback_on_cancel:
+                    self.callback_on_cancel()
+        elif self.mode == 'click_pos':
             if self.callback_on_snip_done:
-                self.callback_on_snip_done(self.save_path)
-        else:
-            if self.callback_on_cancel:
-                self.callback_on_cancel()
+                self.callback_on_snip_done(self.begin)
+        else: # 기본 캡처 모드
+            x1, y1 = min(self.begin.x(), self.end.x()), min(self.begin.y(), self.end.y())
+            x2, y2 = max(self.begin.x(), self.end.x()), max(self.begin.y(), self.end.y())
+            if abs(x2 - x1) > 5 and abs(y2 - y1) > 5:
+                img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+                img.save(self.save_path)
+                if self.callback_on_snip_done:
+                    self.callback_on_snip_done(self.save_path)
+            else:
+                if self.callback_on_cancel:
+                    self.callback_on_cancel()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:

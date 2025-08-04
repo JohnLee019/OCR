@@ -5,16 +5,19 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QSize, QPoint, QTimer
 from PyQt5.QtGui import QIcon
-from combined import SnippingTool, run_pipeline, pause_audio, resume_audio, stop_audio, get_last_ocr_text, restart_audio, is_audio_busy, is_audio_finished, SNIP_PATH, OUTPUT_FILE
+from PIL import ImageGrab
+import tempfile
+import uuid
+from combined import SnippingTool, run_pipeline, pause_audio, resume_audio, stop_audio, get_last_ocr_text, restart_audio, is_audio_busy, is_audio_finished, SNIP_PATH, OUTPUT_FILE, perform_mouse_click, get_current_audio_file
+
 
 # 이미지 및 대체 텍스트 설정
 IMAGE_DIR = "image"
 FALLBACK = {
     "toggle": "≡", "close": "✕",
-    "snip": "📷", "pause": "⏸", "play": "▶", "cancel": "✖", "restart": "🔁", "stop": "■"
+    "snip": "📷", "pause": "⏸", "play": "▶", "cancel": "✖", "restart": "🔁", "stop": "■",
+    "continuous_read": "📚"
 }
-# OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'result')
-# OUTPUT_FILE = os.path.join(OUTPUT_DIR, 'snip_ocr.txt')
 
 
 class ToolBar(QWidget):
@@ -34,12 +37,20 @@ class ToolBar(QWidget):
         self.snipping_active = False
         self.snipper = None
         self.audio_status = 'stopped'
+        self.continuous_read_active = False
+        self.is_setting_next_page_pos = False
+        self.is_waiting_for_next_page = False
+
+        # 연속 읽기 기능 관련 속성
+        self.reading_area = None
+        self.next_page_click_pos = None
 
         # 오디오 버튼 변수 초기화
         self.pause_btn = None
         self.play_btn = None
         self.stop_btn = None
         self.restart_btn = None
+        self.continuous_read_btn = None
 
         # 창 크기 조절 관련 변수
         self.resize_margin = 8
@@ -51,7 +62,7 @@ class ToolBar(QWidget):
         # 오디오 상태를 주기적으로 확인하는 타이머 추가
         self.audio_timer = QTimer(self)
         self.audio_timer.timeout.connect(self._check_audio_status)
-        self.audio_timer.start(250) # 250ms마다 상태 확인
+        self.audio_timer.start(250)
 
     def init_ui(self):
         self.layout = QVBoxLayout(self)
@@ -60,7 +71,6 @@ class ToolBar(QWidget):
         # 상단 바 (토글, 제목, 닫기 버튼 포함)
         self.top_bar = QFrame(self)
         self.top_bar.setFixedHeight(40)
-        # 상단 바의 스타일에서 하단 테두리를 제거합니다.
         self.top_bar.setStyleSheet("background-color:#004ea2;")
         h = QHBoxLayout(self.top_bar)
         h.setContentsMargins(8, 5, 8, 5)
@@ -119,6 +129,21 @@ class ToolBar(QWidget):
             self.layout.addWidget(row_widget)
             self.tool_containers.append(row_widget)
 
+        # '연속 읽기' 버튼 추가
+        read_row_widget = QWidget(self)
+        read_row = QHBoxLayout(read_row_widget)
+        read_row.setContentsMargins(10, 2, 10, 2)
+        self.continuous_read_btn = self._create_icon("continuous_read", 48, 36)
+        self.continuous_read_btn.clicked.connect(self.start_continuous_reading)
+        read_lbl = QLabel("연속 읽기", self)
+        read_lbl.setStyleSheet("font-size:16px; font-weight:900;")
+        read_row.addWidget(self.continuous_read_btn)
+        read_row.addWidget(read_lbl)
+        read_row.addStretch()
+        read_row_widget.setVisible(False)
+        self.layout.addWidget(read_row_widget)
+        self.tool_containers.append(read_row_widget)
+        
         self._update_audio_button_colors(self.audio_status)
 
         # 취소 버튼
@@ -135,27 +160,30 @@ class ToolBar(QWidget):
         self.cancel_button_widget.setVisible(False)
         self.layout.addWidget(self.cancel_button_widget)
 
-        # 툴바 전체 위젯에 테두리 스타일을 적용합니다.
         self.setStyleSheet("QWidget{background:#f9f9f9;}")
 
     def _check_audio_status(self):
         """오디오 상태가 변경되었는지 확인하고 UI를 업데이트합니다."""
-        if self.audio_status in ['playing', 'paused'] and not is_audio_busy():
-            # 오디오가 끝나거나 중단된 경우
+        if self.audio_status == 'playing' and not is_audio_busy():
+            print("[ToolBar] 오디오 재생이 자연스럽게 완료됨.")
             self.audio_status = 'finished'
             self._update_audio_button_colors(self.audio_status)
         
+        if self.continuous_read_active and self.audio_status == 'finished' and not self.is_waiting_for_next_page:
+            print("[Continuous Read] 오디오 재생 완료. 다음 페이지로 이동합니다.")
+            self._update_audio_button_colors(self.audio_status)
+            self._next_page_action()
+        
     def _update_audio_button_colors(self, status):
         """버튼 색은 유지하면서 클릭 가능 여부만 조정"""
-        pause_clickable = (status == 'playing')
-        play_clickable = (status == 'paused')
-        stop_clickable = (status in ['playing', 'paused', 'finished']) # 'finished' 상태일 때도 정지 버튼 활성화
-        # 오디오가 재생 중이거나 일시정지, 또는 끝났을 때 다시듣기 활성화
-        restart_clickable = (status in ['playing', 'paused', 'finished'])
-        snip_clickable = not self.snipping_active
-        snip_clickable = not self.snipping_active and status != 'playing'
+        pause_clickable = (status == 'playing' or (self.continuous_read_active and status == 'playing'))
+        play_clickable = (status == 'paused' or (self.continuous_read_active and status == 'paused'))
+        stop_clickable = (status in ['playing', 'paused', 'finished'] or self.continuous_read_active) 
+        restart_clickable = (status in ['playing', 'paused', 'finished'] or self.continuous_read_active)
+        snip_clickable = not self.snipping_active and not is_audio_busy() and not self.continuous_read_active
+        continuous_read_clickable = not self.snipping_active and not is_audio_busy() and not self.continuous_read_active
 
-        if self.pause_btn and self.play_btn and self.stop_btn and self.restart_btn and self.snip_btn:
+        if self.pause_btn and self.play_btn and self.stop_btn and self.restart_btn and self.snip_btn and self.continuous_read_btn:
             base_style = """
                 QPushButton {
                     background-color:#ffffff;
@@ -163,35 +191,35 @@ class ToolBar(QWidget):
                 }
                 QPushButton:disabled {
                     color: #a0a0a0;
+                    opacity: 0.5;
                 }
             """
             
-            # 캡처 버튼
             self.snip_btn.setStyleSheet(base_style + "color: #000000;")
             self.snip_btn.setEnabled(snip_clickable)
             self.snip_btn.setCursor(Qt.PointingHandCursor if snip_clickable else Qt.ArrowCursor)
             
-            # 일시정지 버튼 (빨강)
             self.pause_btn.setStyleSheet(base_style + "color: #dc3545;")
             self.pause_btn.setEnabled(pause_clickable)
             self.pause_btn.setCursor(Qt.PointingHandCursor if pause_clickable else Qt.ArrowCursor)
 
-            # 재생 버튼 (검정)
             self.play_btn.setStyleSheet(base_style + "color: #000000;")
             self.play_btn.setEnabled(play_clickable)
             self.play_btn.setCursor(Qt.PointingHandCursor if play_clickable else Qt.ArrowCursor)
             
-            # 다시듣기 버튼 (검정)
             self.restart_btn.setStyleSheet(base_style + "color: #000000;")
             self.restart_btn.setEnabled(restart_clickable)
             self.restart_btn.setCursor(Qt.PointingHandCursor if restart_clickable else Qt.ArrowCursor)
             
-            # 정지 버튼 (검정)
             self.stop_btn.setStyleSheet(base_style + "color: #000000;")
             self.stop_btn.setEnabled(stop_clickable)
             self.stop_btn.setCursor(Qt.PointingHandCursor if stop_clickable else Qt.ArrowCursor)
 
-            print(f"✅ 오디오 상태 업데이트: 일시정지({pause_clickable}), 재생({play_clickable}), 다시듣기({restart_clickable}), 정지({stop_clickable}), 캡처({snip_clickable})")
+            self.continuous_read_btn.setStyleSheet(base_style + "color: #000000;")
+            self.continuous_read_btn.setEnabled(continuous_read_clickable)
+            self.continuous_read_btn.setCursor(Qt.PointingHandCursor if continuous_read_clickable else Qt.ArrowCursor)
+
+            print(f"✅ 오디오 상태 업데이트: 일시정지({pause_clickable}), 재생({play_clickable}), 다시듣기({restart_clickable}), 정지({stop_clickable}), 캡처({snip_clickable}), 연속읽기({continuous_read_clickable})")
 
     def _on_pause_clicked(self):
         if self.audio_status == 'playing':
@@ -212,7 +240,6 @@ class ToolBar(QWidget):
             print("[ToolBar] 오디오가 일시정지 상태가 아니므로 재생 버튼 클릭 무시.")
 
     def _on_restart_clicked(self):
-        """오디오를 처음부터 다시 재생합니다."""
         if self.audio_status != 'stopped':
             print("[ToolBar] 다시듣기 버튼 클릭됨.")
             restart_audio()
@@ -222,26 +249,43 @@ class ToolBar(QWidget):
             print("[ToolBar] 오디오가 재생 또는 일시정지 상태가 아니므로 다시듣기 버튼 클릭 무시.")
 
     def _on_stop_clicked(self):
-        """오디오를 완전히 정지하고 상태를 업데이트합니다."""
-        if self.audio_status != 'stopped':
-            print("[ToolBar] 정지 버튼 클릭됨.")
-            stop_audio()
-            self.audio_status = 'stopped'
-            self._update_audio_button_colors(self.audio_status)
-        else:
-            print("[ToolBar] 오디오가 이미 정지 상태이므로 정지 버튼 클릭 무시.")
-            
+        print("[ToolBar] 정지 버튼 클릭됨.")
+        if self.continuous_read_active:
+            print("[ToolBar] 연속 읽기 모드 종료.")
+            self.continuous_read_active = False
+            self.is_waiting_for_next_page = False
+            self.is_setting_next_page_pos = False
+        
+        stop_audio()
+        self.audio_status = 'stopped'
+        self._update_audio_button_colors(self.audio_status)
+        
     def start_snipping(self):
         print("[ToolBar] start_snipping 호출됨. 툴바 숨김.")
+        
+        if self.continuous_read_active:
+            print("[ToolBar] 연속 읽기 모드 중이므로 모드를 종료하고 캡처 시작.")
+            stop_audio()
+            self.continuous_read_active = False
+            self.is_waiting_for_next_page = False
+            self.is_setting_next_page_pos = False
+            self.audio_status = 'stopped'
+            self._update_audio_button_colors(self.audio_status)
+        
+        stop_audio()
+        self.audio_status = 'stopped'
+
         self.snipping_active = True
         self.hide()
         self.snipper = SnippingTool(
+            mode='normal',
             callback_on_cancel=self.on_snipping_cancelled,
             callback_on_snip_done=self.handle_snipped_image
         )
         self.snipper.show()
         self.show_cancel_button()
         self.audio_timer.stop()
+        self._update_audio_button_colors(self.audio_status)
 
     def handle_snipped_image(self, image_path):
         print(f"[ToolBar] handle_snipped_image 콜백 호출됨: {image_path}")
@@ -251,6 +295,7 @@ class ToolBar(QWidget):
         self.snipping_active = False
         self.hide_cancel_button()
         self.show()
+        
         self.is_expanded = False
         self.toggle_toolbar()
         
@@ -283,7 +328,6 @@ class ToolBar(QWidget):
             self.snipper.canceled = True
             self.snipper.close()
 
-        # snip.png와 snip_ocr.txt 파일 삭제
         try:
             if os.path.exists(SNIP_PATH):
                 os.remove(SNIP_PATH)
@@ -301,9 +345,12 @@ class ToolBar(QWidget):
     def on_snipping_cancelled(self):
         print("[ToolBar] on_snipping_cancelled 호출됨. 툴바 상태 복원 시작.")
         self.snipping_active = False
+        self.continuous_read_active = False
+        self.is_setting_next_page_pos = False
         self.hide_cancel_button()
         self.show()
         print("[ToolBar] 툴바 창 다시 표시 요청됨 (self.show()).")
+
         self.is_expanded = False
         self.toggle_toolbar()
         
@@ -316,6 +363,100 @@ class ToolBar(QWidget):
 
         self.audio_timer.start(250)
         print("[ToolBar] on_snipping_cancelled 처리 완료.")
+
+    def start_continuous_reading(self):
+        """연속 읽기 모드 시작."""
+        if self.continuous_read_active:
+            self.continuous_read_active = False
+            self.continuous_read_btn.setStyleSheet("background:transparent;")
+            stop_audio()
+            self.audio_status = 'stopped'
+            self._update_audio_button_colors(self.audio_status)
+            print("[ToolBar] 연속 읽기 모드 종료.")
+            return
+
+        print("[ToolBar] 연속 읽기 모드 시작. 읽기 영역 설정 시작.")
+        stop_audio()
+        self.audio_status = 'stopped'
+        
+        self.continuous_read_active = True
+        self.is_setting_next_page_pos = False
+        self.hide()
+        self.snipper = SnippingTool(
+            mode='read_area',
+            callback_on_cancel=self.on_snipping_cancelled,
+            callback_on_snip_done=self.handle_continuous_read_area,
+            instruction_text="텍스트로 채워진 전자 도서의 범위를 지정해주세요."
+        )
+        self.snipper.show()
+        self.show_cancel_button()
+
+    def handle_continuous_read_area(self, area):
+        """읽기 영역 설정 완료 후 호출."""
+        if area:
+            self.reading_area = area
+            print("[ToolBar] 읽기 영역 설정 완료. 다음 페이지 버튼 위치 설정 시작.")
+            self.snipper.close()
+            self.hide()
+            self.is_setting_next_page_pos = True
+            self.snipper = SnippingTool(
+                mode='click_pos',
+                callback_on_cancel=self.on_snipping_cancelled,
+                callback_on_snip_done=self.handle_next_page_pos,
+                instruction_text="다음 페이지의 버튼 위를 클릭 해주세요."
+            )
+            self.snipper.show()
+        else:
+            self.on_snipping_cancelled()
+
+    def handle_next_page_pos(self, pos):
+        """다음 페이지 버튼 위치 설정 완료 후 호출."""
+        if pos:
+            self.next_page_click_pos = pos
+            print("[ToolBar] 다음 페이지 버튼 위치 설정 완료. 첫 번째 읽기 시작.")
+            self.is_setting_next_page_pos = False
+            self.snipper.close()
+            self.hide_cancel_button()
+            self.show()
+
+            self.is_expanded = False
+            self.toggle_toolbar()
+
+            self._start_reading_loop()
+        else:
+            self.on_snipping_cancelled()
+
+    def _start_reading_loop(self):
+        """읽기 루프 시작 (첫 실행)"""
+        if not self.continuous_read_active:
+            return
+        
+        self.hide()
+        QApplication.processEvents()
+        
+        if self.reading_area:
+            img = ImageGrab.grab(bbox=self.reading_area)
+            temp_path = os.path.join(tempfile.gettempdir(), f'snip_continuous_{uuid.uuid4().hex}.png')
+            img.save(temp_path)
+            
+            self.audio_status = 'playing'
+            run_pipeline(temp_path)
+            self.show()
+            
+            self._update_audio_button_colors(self.audio_status)
+            self.audio_timer.start(250)
+            self.is_waiting_for_next_page = False
+        else:
+            print("[ERROR] 읽기 영역이 설정되지 않았습니다. 연속 읽기 중단.")
+            self.continuous_read_active = False
+            self.show()
+    
+    def _next_page_action(self):
+        """다음 페이지로 넘어가는 액션을 수행합니다."""
+        if self.continuous_read_active and not is_audio_busy():
+            self.is_waiting_for_next_page = True
+            perform_mouse_click(self.next_page_click_pos)
+            QTimer.singleShot(2000, self._start_reading_loop)
 
     def show_cancel_button(self):
         print("[ToolBar] show_cancel_button 호출됨.")
@@ -376,9 +517,9 @@ class ToolBar(QWidget):
             c.setVisible(self.is_expanded)
 
         if self.is_expanded:
-            self.setMinimumSize(160, 230)
-            self.setMaximumSize(300, 360)
-            self.resize(250, 280)
+            self.setMinimumSize(250, 350)
+            self.setMaximumSize(350, 450)
+            self.resize(300, 400)
             print("[ToolBar] 툴바 확장됨.")
             self._update_audio_button_colors(self.audio_status)
         else:
@@ -405,7 +546,7 @@ class ToolBar(QWidget):
         for c in self.tool_containers:
             btn = c.layout().itemAt(0).widget()
             btn_name = btn.objectName()
-            if btn_name in ("snip", "pause", "play", "stop", "restart"):
+            if btn_name in ("snip", "pause", "play", "stop", "restart", "continuous_read"):
                 btn.setStyleSheet("background:transparent;")
             
     def mousePressEvent(self, event):
