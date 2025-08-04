@@ -123,10 +123,25 @@ def pause_audio():
 def resume_audio():
     global _pygame
     if _pygame is None: return
-    if not _pygame.mixer.music.get_busy():
+    # 오디오가 일시정지 상태일 때만 unpause() 호출
+    # pygame.mixer.music.get_busy()는 일시정지 시 False가 되므로, 
+    # 오디오가 로드되어 있지만 재생 중이 아닐 때를 확인해야 함
+    if _pygame.mixer.music.get_busy() == 0 and _tts_file_path:
         _pygame.mixer.music.unpause()
         print("▶ 오디오 재생 재개")
 
+def restart_audio():
+    """현재 오디오를 처음부터 다시 재생합니다."""
+    global _pygame, _tts_file_path
+    if _pygame is None:
+        print("[ERROR] Pygame이 초기화되지 않았습니다.")
+        return
+    if _tts_file_path:
+        print("🔁 오디오 다시듣기")
+        play_audio(_tts_file_path)
+    else:
+        print("[combined] 오디오가 로드되지 않아 다시듣기를 실행할 수 없습니다.")
+        
 def stop_audio():
     global _tts_file_path, _pygame
     if _pygame is None: return
@@ -135,6 +150,18 @@ def stop_audio():
         print("⏹ 오디오 정지")
         _tts_file_path = None
 
+def is_audio_busy():
+    global _pygame
+    if _pygame is None:
+        return False
+    return _pygame.mixer.music.get_busy()
+
+def is_audio_finished():
+    global _pygame
+    if _pygame is None:
+        return True
+    return not _pygame.mixer.music.get_busy() and _tts_file_path is not None
+    
 def get_current_audio_file():
     return _tts_file_path
 
