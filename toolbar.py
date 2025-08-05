@@ -70,7 +70,7 @@ class ToolBar(QWidget):
 
         # 상단 바 (토글, 제목, 닫기 버튼 포함)
         self.top_bar = QFrame(self)
-        self.top_bar.setFixedHeight(40)
+        self.top_bar.setFixedHeight(50)
         self.top_bar.setStyleSheet("background-color:#004ea2;")
         h = QHBoxLayout(self.top_bar)
         h.setContentsMargins(8, 5, 8, 5)
@@ -78,7 +78,7 @@ class ToolBar(QWidget):
         self.toggle_btn = self._create_icon("toggle", 28, 20)
         self.toggle_btn.clicked.connect(self.toggle_toolbar)
         self.title_lbl = QLabel("툴바", self)
-        self.title_lbl.setStyleSheet("color:#ffffff; font-size:15px; font-weight:900;")
+        self.title_lbl.setStyleSheet("color:#ffffff; font-size:17px; font-weight:900;")
         self.close_btn = self._create_icon("close", 28, 20)
         self.close_btn.clicked.connect(self.close_application)
 
@@ -518,8 +518,8 @@ class ToolBar(QWidget):
 
         if self.is_expanded:
             self.setMinimumSize(250, 350)
-            self.setMaximumSize(350, 450)
-            self.resize(300, 400)
+            self.setMaximumSize(320, 500)
+            self.resize(280, 400)
             print("[ToolBar] 툴바 확장됨.")
             self._update_audio_button_colors(self.audio_status)
         else:
@@ -570,7 +570,19 @@ class ToolBar(QWidget):
         if self.resizing:
             self._perform_resize(event.globalPos())
         elif self.dragging:
-            self.move(event.globalPos() - self.drag_offset)
+            # 창의 새 위치 계산
+            new_pos = event.globalPos() - self.drag_offset
+
+            # 화면 경계 가져오기
+            screen_rect = QApplication.desktop().availableGeometry(self)
+            
+            # 새 위치가 화면 경계를 벗어나지 않도록 조정
+            x = max(screen_rect.left(), new_pos.x())
+            x = min(screen_rect.right() - self.width(), x)
+            y = max(screen_rect.top(), new_pos.y())
+            y = min(screen_rect.bottom() - self.height(), y)
+
+            self.move(x, y)
         elif self.is_expanded:
             self._update_cursor(event.pos())
 
