@@ -8,6 +8,7 @@ from PyQt5.QtGui import QPainter, QPen, QGuiApplication, QFont, QColor
 from PyQt5.QtCore import Qt, QRect, pyqtSignal, QObject, QPoint
 import time
 from PIL import ImageGrab
+from paddleocr import PaddleOCR
 import pyautogui
 
 #-----------------------------------------
@@ -65,8 +66,7 @@ def initialize_components(progress_callback):
         for i in range(15, 80, 5):
             progress_callback.emit(i, f"OCR 모델 로딩 중... ({i}%)")
             time.sleep(0.1)
-        
-        from paddleocr import PaddleOCR
+             
         ocr = PaddleOCR(
             use_textline_orientation=False,
             use_doc_orientation_classify=False,
