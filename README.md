@@ -27,14 +27,15 @@ Window title: “국립중앙도서관 오디오” (National Library of Korea A
 
 Project Structure
 arduino
+
 project/
 ├─ main.py
 ├─ combined.py
 ├─ toolbar.py
-├─ image/                 # optional icon files (emoji fallback if missing)
+├─ image/                
 └─ result/
-   ├─ snip.png            # latest captured image
-   └─ snip_ocr.txt        # OCR output text
+   ├─ snip.png          
+   └─ snip_ocr.txt       
 result/snip.png and result/snip_ocr.txt are created automatically at runtime.
 
 Quick Start
