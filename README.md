@@ -29,13 +29,21 @@ Project Structure
 arduino
 
 project/
+
 ├─ main.py
+
 ├─ combined.py
+
 ├─ toolbar.py
-├─ image/                
+
+├─ image/                # optional icon files (emoji fallback if missing)
+
 └─ result/
-   ├─ snip.png          
-   └─ snip_ocr.txt       
+
+   ├─ snip.png          # latest captured image
+   
+   └─ snip_ocr.txt       # OCR output text
+   
 result/snip.png and result/snip_ocr.txt are created automatically at runtime.
 
 Quick Start
