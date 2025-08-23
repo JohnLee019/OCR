@@ -1,7 +1,7 @@
 import sys, os
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QFrame, QLabel
+    QPushButton, QFrame, QLabel, QDialog, QProgressBar
 )
 from PyQt5.QtCore import Qt, QSize, QPoint, QTimer
 from PyQt5.QtGui import QIcon
@@ -41,6 +41,8 @@ class ToolBar(QWidget):
         self.is_setting_next_page_pos = False
         self.is_waiting_for_next_page = False
 
+        self._overlay = None
+
         # 연속 읽기 기능 관련 속성
         self.reading_area = None
         self.next_page_click_pos = None
@@ -63,6 +65,19 @@ class ToolBar(QWidget):
         self.audio_timer = QTimer(self)
         self.audio_timer.timeout.connect(self._check_audio_status)
         self.audio_timer.start(250)
+
+    def _show_processing(self, text="처리 중…"):
+        if self._overlay is None:
+            self._overlay = ProcessingOverlay(self, text=text)
+        else:
+            self._overlay.set_text(text)
+        self._overlay.popup_near(self)
+        self._overlay.show()
+        QApplication.processEvents()  # 동기 호출 직전 한 번 그려주기
+
+    def _hide_processing(self):
+        if self._overlay and self._overlay.isVisible():
+            self._overlay.hide()
 
     def init_ui(self):
         self.layout = QVBoxLayout(self)
@@ -290,24 +305,29 @@ class ToolBar(QWidget):
     def handle_snipped_image(self, image_path):
         print(f"[ToolBar] handle_snipped_image 콜백 호출됨: {image_path}")
         stop_audio()
-        run_pipeline(image_path)
-        
+
+        # ▶ 로딩 오버레이 표시
+        self._show_processing("OCR/TTS 처리 중…")
+
+        try:
+            run_pipeline(image_path)  # 기존 동기 호출 그대로 유지
+        finally:
+            # ▶ 처리 후 반드시 닫기
+            self._hide_processing()
+
         self.snipping_active = False
         self.hide_cancel_button()
         self.show()
-        
         self.is_expanded = False
         self.toggle_toolbar()
-        
         self.audio_status = 'playing'
         self._update_audio_button_colors(self.audio_status)
-        
         if self.snipper:
             print("[ToolBar] 스니퍼 인스턴스 정리.")
             self.snipper = None
-        
         self.audio_timer.start(250)
         print("[ToolBar] handle_snipped_image 처리 완료.")
+
 
     def cancel_snipping(self):
         print("[ToolBar] cancel_snipping 호출됨 (취소 버튼 클릭).")
@@ -441,6 +461,13 @@ class ToolBar(QWidget):
             
             self.audio_status = 'playing'
             run_pipeline(temp_path)
+            self._show_processing("OCR/TTS 처리 중…")
+            try:
+                self.audio_status = 'playing'
+                run_pipeline(temp_path)  # 기존 동기 호출 그대로
+            finally:
+                self._hide_processing()
+
             self.show()
             
             self._update_audio_button_colors(self.audio_status)
@@ -646,3 +673,40 @@ class ToolBar(QWidget):
 
         self.setGeometry(g)
         self.drag_start_position = global_pos
+
+class ProcessingOverlay(QDialog):
+    def __init__(self, parent=None, text="처리 중…"):
+        super().__init__(parent, flags=Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(False)
+        self.setFixedSize(260, 110)
+
+        cont = QWidget(self)
+        cont.setStyleSheet("""
+            QWidget{ background: rgba(0,0,0,0.65); border-radius: 12px; }
+            QLabel{ color: #ffffff; font-size: 14px; }
+            QProgressBar{ background:#222; border:1px solid #444; border-radius:6px;
+                          text-align:center; color:#fff; }
+            QProgressBar::chunk{ background:#4aa3ff; border-radius:6px; }
+        """)
+        v = QVBoxLayout(cont); v.setContentsMargins(16,16,16,16)
+        self.msg = QLabel(text, cont)
+        self.bar = QProgressBar(cont)
+        # 동기 처리 중 애니메이션 대신 '바 모드'로 표시 (마퀴 효과)
+        self.bar.setRange(0, 0)  # 0,0 => Busy indicator
+        v.addWidget(self.msg); v.addWidget(self.bar)
+
+        wrap = QVBoxLayout(self); wrap.setContentsMargins(0,0,0,0); wrap.addWidget(cont)
+
+    def popup_near(self, anchor: QWidget):
+        if not anchor:
+            self.move(300, 300); return
+        g = anchor.frameGeometry()
+        x = g.right() + 12; y = g.top()
+        screen_rect = QApplication.desktop().availableGeometry(anchor)
+        if x + self.width() > screen_rect.right(): x = g.left() - self.width() - 12
+        if y + self.height() > screen_rect.bottom(): y = screen_rect.bottom() - self.height() - 12
+        self.move(x, y)
+
+    def set_text(self, text: str):
+        if text: self.msg.setText(text)
