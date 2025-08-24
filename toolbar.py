@@ -71,6 +71,7 @@ class ToolBar(QWidget):
             self._overlay = ProcessingOverlay(self, text=text)
         else:
             self._overlay.set_text(text)
+        self._overlay.bar.setValue(0)
         self._overlay.popup_near(self)
         self._overlay.show()
         QApplication.processEvents()  # 동기 호출 직전 한 번 그려주기
@@ -310,7 +311,7 @@ class ToolBar(QWidget):
         self._show_processing("OCR/TTS 처리 중…")
 
         try:
-            run_pipeline(image_path)  # 기존 동기 호출 그대로 유지
+            run_pipeline(image_path, progress_cb=self._overlay.update_progress)  # 기존 동기 호출 그대로 유지
         finally:
             # ▶ 처리 후 반드시 닫기
             self._hide_processing()
@@ -447,36 +448,43 @@ class ToolBar(QWidget):
             self.on_snipping_cancelled()
 
     def _start_reading_loop(self):
-        """읽기 루프 시작 (첫 실행)"""
+        """읽기 루프 시작 (첫 실행 및 다음 페이지 루프 공통)"""
         if not self.continuous_read_active:
             return
-        
+
+        # 화면 캡처 준비
         self.hide()
         QApplication.processEvents()
-        
-        if self.reading_area:
-            img = ImageGrab.grab(bbox=self.reading_area)
-            temp_path = os.path.join(tempfile.gettempdir(), f'snip_continuous_{uuid.uuid4().hex}.png')
-            img.save(temp_path)
-            
-            self.audio_status = 'playing'
-            run_pipeline(temp_path)
-            self._show_processing("OCR/TTS 처리 중…")
-            try:
-                self.audio_status = 'playing'
-                run_pipeline(temp_path)  # 기존 동기 호출 그대로
-            finally:
-                self._hide_processing()
 
-            self.show()
-            
-            self._update_audio_button_colors(self.audio_status)
-            self.audio_timer.start(250)
-            self.is_waiting_for_next_page = False
-        else:
+        if not self.reading_area:
             print("[ERROR] 읽기 영역이 설정되지 않았습니다. 연속 읽기 중단.")
             self.continuous_read_active = False
             self.show()
+            return
+
+        # 영역 캡처
+        img = ImageGrab.grab(bbox=self.reading_area)
+        temp_path = os.path.join(tempfile.gettempdir(), f'snip_continuous_{uuid.uuid4().hex}.png')
+        img.save(temp_path)
+
+        # ✅ 로딩창을 먼저 띄우고 0%로 시작
+        self._show_processing("OCR/TTS 처리 중…")
+
+        try:
+            # ✅ run_pipeline은 딱 한 번만 호출하고, 진행률 콜백 연결
+            #    (이전 코드의 이중 호출/무콜백 호출 제거)
+            self.audio_status = 'stopped'   # 아직 재생 전 상태로 유지
+            run_pipeline(temp_path, progress_cb=self._overlay.update_progress)
+        finally:
+            self._hide_processing()
+
+        # TTS 생성이 끝나면 play_audio가 내부에서 실행되므로 여기서 상태만 'playing'으로
+        self.audio_status = 'playing'
+        self.show()
+        self._update_audio_button_colors(self.audio_status)
+        self.audio_timer.start(250)
+        self.is_waiting_for_next_page = False
+
     
     def _next_page_action(self):
         """다음 페이지로 넘어가는 액션을 수행합니다."""
@@ -693,7 +701,7 @@ class ProcessingOverlay(QDialog):
         self.msg = QLabel(text, cont)
         self.bar = QProgressBar(cont)
         # 동기 처리 중 애니메이션 대신 '바 모드'로 표시 (마퀴 효과)
-        self.bar.setRange(0, 0)  # 0,0 => Busy indicator
+        self.bar.setRange(0, 100)  # 0,0 => Busy indicator
         v.addWidget(self.msg); v.addWidget(self.bar)
 
         wrap = QVBoxLayout(self); wrap.setContentsMargins(0,0,0,0); wrap.addWidget(cont)
@@ -707,6 +715,14 @@ class ProcessingOverlay(QDialog):
         if x + self.width() > screen_rect.right(): x = g.left() - self.width() - 12
         if y + self.height() > screen_rect.bottom(): y = screen_rect.bottom() - self.height() - 12
         self.move(x, y)
+
+    def update_progress(self, value: int, msg: str = ""):
+        self.bar.setValue(value)
+        if msg:
+            self.msg.setText(f"{value}% 완료 — {msg}")
+        else:
+            self.msg.setText(f"{value}% 완료")
+        QApplication.processEvents()
 
     def set_text(self, text: str):
         if text: self.msg.setText(text)

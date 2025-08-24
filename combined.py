@@ -265,24 +265,41 @@ class SnippingTool(QWidget):
 #-----------------------------------------
 # OCR + TTS 실행
 #-----------------------------------------
-def run_pipeline(image_path):
-    global _last_ocr_text, ocr, _edge_tts, _asyncio, KO_VOICE_NAME, EN_VOICE_NAME
+def run_pipeline(image_path, progress_cb=None):
+    """
+    이미지 경로를 받아 OCR → 텍스트 파일 저장 → TTS 생성/재생까지 수행.
+    진행 상황을 퍼센트로 업데이트할 수 있도록 progress_cb(value:int, msg:str) 콜백을 지원.
+    """
+    global _last_ocr_text, ocr, _edge_tts, _asyncio, _pygame, KO_VOICE_NAME, EN_VOICE_NAME
+
     if ocr is None or _edge_tts is None or _asyncio is None:
         print("[ERROR] 필수 컴포넌트(OCR, TTS)가 초기화되지 않았습니다.")
+        if progress_cb: progress_cb(100, "오류")
         return
-    
+
+    def _p(val, msg=""):
+        try:
+            if progress_cb:
+                progress_cb(int(max(0, min(100, val))), msg)
+        except Exception:
+            # 진행 콜백으로 인한 오류는 무시하고 파이프라인 계속
+            pass
+
     print(f"[run_pipeline] 파이프라인 시작: {image_path}")
-    
+    _p(5, "준비 중…")
+
     try:
-        # OCR
+        # ── 1) OCR ───────────────────────────────────────────────────────────
+        _p(10, "OCR 시작")
         print("🧠 Running PaddleOCR...")
         raw = ocr.ocr(image_path)
-        
+        _p(40, "텍스트 인식 중…")
+
         texts = []
         if isinstance(raw, list) and raw and isinstance(raw[0], dict) and 'rec_texts' in raw[0]:
             texts = raw[0]['rec_texts']
         elif isinstance(raw, list) and raw and isinstance(raw[0], list):
-             for line in raw:
+            for line in raw:
                 for item in line:
                     if isinstance(item, list) and len(item) >= 2:
                         text_data = item[1]
@@ -290,45 +307,53 @@ def run_pipeline(image_path):
                             texts.append(text_data[0])
                         else:
                             texts.append(text_data)
-        
+
         full_text = "\n".join(texts)
-        print(f"📄 OCR로 인식된 텍스트:\n{full_text}")
-        
+        print(f"📄 OCR로 인식된 텍스트(요약 {len(full_text)}자)")
         if not full_text.strip():
             print("🚫 인식된 텍스트가 없습니다. 오디오를 생성하지 않습니다.")
+            _p(100, "인식된 텍스트 없음")
             return
 
-        # 파일로 저장
+        # ── 2) 파일 저장 ─────────────────────────────────────────────────────
+        _p(55, "텍스트 저장 중…")
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
             f.write(full_text)
         print(f"✅ OCR text saved to {OUTPUT_FILE}")
         _last_ocr_text = full_text
 
-        # 텍스트에 한국어 문자가 포함되어 있는지 확인
-        has_korean = any('\uac00' <= char <= '\ud7a3' for char in full_text)
-
-        # 한국어 문자가 있으면 한국어 TTS, 없으면 영어 TTS 선택
+        # ── 3) 언어 감지 및 음성 선택 ─────────────────────────────────────────
+        has_korean = any('\uac00' <= ch <= '\ud7a3' for ch in full_text)
         voice_name = KO_VOICE_NAME if has_korean else EN_VOICE_NAME
         print(f"🎤 선택된 TTS 음성: {voice_name}")
 
+        # 기존 재생 중 오디오 정리
         if _pygame is not None and _pygame.mixer.music.get_busy():
             _pygame.mixer.music.stop()
             time.sleep(0.1)
 
+        # ── 4) TTS 생성 ──────────────────────────────────────────────────────
+        _p(75, "TTS 변환 준비…")
         temp_audio = os.path.join(tempfile.gettempdir(), f'snip_tts_{uuid.uuid4().hex}.mp3')
 
         async def gen_tts():
             tts = _edge_tts.Communicate(text=full_text, voice=voice_name)
             await tts.save(temp_audio)
 
+        _p(80, "TTS 변환 중…")
         _asyncio.run(gen_tts())
         print("🔉 TTS 오디오 생성 완료")
 
+        # ── 5) 재생 ──────────────────────────────────────────────────────────
+        _p(90, "오디오 재생 준비…")
         play_audio(temp_audio)
 
+        _p(100, "완료")
     except Exception as e:
         print(f"[ERROR] run_pipeline 오류: {e}")
+        _p(100, "오류")
+
 
 def get_last_ocr_text():
     global _last_ocr_text
