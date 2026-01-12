@@ -25,6 +25,7 @@ If icon files are missing, emoji/text icons are used automatically.
 
 Window title: “국립중앙도서관 오디오” (National Library of Korea Audio).
 
+```text
 # Project Structure
 project/
 ├─ main.py            # entry point (loading screen → toolbar)
