@@ -35,7 +35,7 @@ project/
 └─ result/
    ├─ snip.png        # latest captured image
    └─ snip_ocr.txt    # OCR output text
-   
+```
 result/snip.png and result/snip_ocr.txt are created automatically at runtime.
 
 # Quick Start
